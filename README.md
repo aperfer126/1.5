@@ -1,236 +1,276 @@
-### ¿Qué es SSL/HTTPS?
+## [AMPLIACIÓN - Práctica 1.5] Certificados Válidos con Let's Encrypt y Certbot
 
-**SSL (Secure Sockets Layer)** y su sucesor **TLS (Transport Layer Security)** son protocolos que cifran la conexión entre el navegador y el servidor, protegiendo datos sensibles como credenciales, información personal, etc.
+### ¿Qué es Let's Encrypt?
 
-**HTTPS** es HTTP sobre SSL/TLS. En lugar del puerto 80 (HTTP), usa el puerto 443 (HTTPS).
+**Let's Encrypt** es una autoridad certificadora gratuita, automatizada y abierta que proporciona certificados SSL/TLS válidos reconocidos por todos los navegadores. A diferencia de los certificados autofirmados, los de Let's Encrypt:
 
-### ¿Qué son los certificados autofirmados?
+- ✅ Son reconocidos por navegadores (sin advertencias)
+- ✅ Son completamente gratuitos
+- ✅ Se renuevan automáticamente cada 90 días
+- ✅ Ideales para producción
+- ✅ Mejoran el SEO de tu sitio
 
-Un certificado autofirmado es un certificado que generas tú mismo, sin autoridad certificadora externa. Es útil para desarrollo y testing, pero en producción se recomienda un certificado de autoridad certificadora reconocida.
+### ¿Qué es Certbot?
 
-### Nuevo Script: setup_selfsigned_certificate.sh
+**Certbot** es el cliente oficial de Let's Encrypt. Automatiza completamente la solicitud, instalación y renovación de certificados. Se integra con Apache para:
 
-He creado un nuevo script que automatiza completamente la configuración de HTTPS.
+- Generar certificados válidos automáticamente
+- Configurar Apache para usar HTTPS
+- Renovar certificados antes de que expiren
+- Crear redirecciones automáticas de HTTP a HTTPS
 
-#### Comando:
+### Nuevo Script: setup_letsencrypt_certificate.sh
+
+Este script automatiza todo el proceso de instalación de Let's Encrypt con Certbot.
+
+#### Requisitos previos para Let's Encrypt
+
+Antes de ejecutar el script, asegúrate de tener:
+
+1. **Un dominio registrado** que apunte a tu servidor
+   - Let's Encrypt valida la propiedad del dominio
+   - No funciona solo con IPs
+
+2. **Puerto 80 accesible** desde internet
+   - Certbot usa validación HTTP (puerto 80)
+   - Firewall/Security Groups deben permitir acceso
+
+3. **DNS correctamente configurado**
+   ```bash
+   nslookup tu-dominio.com
+   # Debe resolver a la IP de tu servidor
+   ```
+
+#### Comando de ejecución:
+
 ```bash
 cd scripts
-sudo bash setup_selfsigned_certificate.sh
+sudo bash setup_letsencrypt_certificate.sh
 ```
 
 #### ¿Qué hace este script paso a paso?
 
-**1. Generar el certificado autofirmado**
+**1. Instalar y actualizar snap**
 ```bash
-openssl req \
-  -x509 \
-  -nodes \
-  -days 365 \
-  -newkey rsa:2048 \
-  -keyout /etc/ssl/private/apache-selfsigned.key \
-  -out /etc/ssl/certs/apache-selfsigned.crt \
-  -subj "/C=$OPENSSL_COUNTRY/ST=$OPENSSL_PROVINCE/L=$OPENSSL_LOCALITY/O=$OPENSSL_ORGANIZATION/OU=$OPENSSL_ORGUNIT/CN=$OPENSSL_COMMON_NAME/emailAddress=$OPENSSL_EMAIL"
+snap install core
+snap refresh core
+```
+- Snap es un gestor de paquetes de Ubuntu
+- Certbot se instala como snap para tener siempre la última versión
+
+**2. Eliminar certbot anterior (si existe)**
+```bash
+apt remove certbot -y
+```
+- Evita conflictos con versiones antiguas de apt
+
+**3. Instalar Certbot desde snap (versión clásica)**
+```bash
+snap install --classic certbot
+```
+- `--classic` es necesario para que certbot tenga acceso a permisos del sistema
+- Instala la última versión estable
+
+**4. Crear enlace simbólico**
+```bash
+ln -fs /snap/bin/certbot /usr/bin/certbot
+```
+- Permite ejecutar `certbot` directamente sin la ruta completa
+
+**5. Solicitar e instalar el certificado**
+```bash
+certbot --apache -m "$LE_EMAIL" --agree-tos --no-eff-email -d "$LE_DOMAIN" --non-interactive
 ```
 
-**Desglose de parámetros:**
-- `-x509`: Genera un certificado X.509 (estándar SSL/TLS)
-- `-nodes`: No cifra la clave privada (necesario para automatización)
-- `-days 365`: Validez de 365 días (1 año)
-- `-newkey rsa:2048`: Genera clave RSA de 2048 bits (seguridad estándar)
-- `-keyout`: Ruta donde guardar la clave privada
-- `-out`: Ruta donde guardar el certificado
-- `-subj`: Datos del certificado sin interacción (desde variables del `.env`)
+**Parámetros explicados:**
+- `--apache`: Integración directa con Apache (configura automáticamente)
+- `-m "$LE_EMAIL"`: Email para notificaciones de renovación
+- `--agree-tos`: Acepta los términos de servicio automáticamente
+- `--no-eff-email`: No comparte el email con Electronic Frontier Foundation
+- `-d "$LE_DOMAIN"`: Dominio para el que generar el certificado
+- `--non-interactive`: Ejecución sin interacción (automatizada)
 
-**Archivos generados:**
-- `/etc/ssl/private/apache-selfsigned.key` - Clave privada (¡CONFIDENCIAL!)
-- `/etc/ssl/certs/apache-selfsigned.crt` - Certificado público
-
-**2. Copiar configuraciones de Apache**
-```bash
-cp ../conf/default-ssl.conf /etc/apache2/sites-available/default-ssl.conf
-cp ../conf/000-default.conf /etc/apache2/sites-available/000-default.conf
-```
-- Instala la configuración HTTPS en Apache
-- Mantiene también la configuración HTTP (puerto 80)
-
-**3. Habilitar el sitio SSL**
-```bash
-a2ensite default-ssl.conf
-```
-- Activa el VirtualHost HTTPS en Apache
-
-**4. Habilitar módulos necesarios**
-```bash
-a2enmod ssl
-a2enmod rewrite
-```
-- `ssl`: Módulo SSL/TLS para Apache
-- `rewrite`: Permite reescrituras de URL (usado para redirigir HTTP → HTTPS)
-
-**5. Reiniciar Apache**
-```bash
-systemctl restart apache2
-```
-- Aplica todos los cambios de configuración
+**Archivos generados por Certbot:**
+- `/etc/letsencrypt/live/tu-dominio.com/fullchain.pem` - Certificado público
+- `/etc/letsencrypt/live/tu-dominio.com/privkey.pem` - Clave privada
+- Configuración automática en Apache
+- Renovación automática configurada en cron
 
 ---
 
-### Nueva Configuración: default-ssl.conf
-
-```apache
-<VirtualHost *:443>
-    DocumentRoot /var/www/html
-    DirectoryIndex index.php index.html
-
-    SSLEngine on
-    SSLCertificateFile /etc/ssl/certs/apache-selfsigned.crt
-    SSLCertificateKeyFile /etc/ssl/private/apache-selfsigned.key
-
-    <Directory /var/www/html>
-        Options Indexes FollowSymLinks
-        AllowOverride All
-        Require all granted
-    </Directory>
-</VirtualHost>
-```
-
-**Explicación:**
-- `<VirtualHost *:443>`: Escucha en puerto 443 (HTTPS estándar)
-- `SSLEngine on`: Activa SSL/TLS en este VirtualHost
-- `SSLCertificateFile`: Ruta del certificado público
-- `SSLCertificateKeyFile`: Ruta de la clave privada
-- El resto es igual a la configuración HTTP
-
----
-
-### Variables de Entorno para OpenSSL
+### Variables de Entorno para Let's Encrypt
 
 Añade estas variables al archivo `.env` en la carpeta `scripts/`:
 
 ```bash
-# Variables para el certificado SSL/TLS
-OPENSSL_COUNTRY="ES"                                    # País (código ISO 2 letras)
-OPENSSL_PROVINCE="Madrid"                               # Provincia/Estado
-OPENSSL_LOCALITY="Madrid"                               # Localidad/Ciudad
-OPENSSL_ORGANIZATION="Mi Empresa"                       # Nombre de la organización
-OPENSSL_ORGUNIT="IT Department"                         # Departamento
-OPENSSL_COMMON_NAME="mi-servidor.com"                   # Nombre del servidor (dominio)
-OPENSSL_EMAIL="admin@mi-servidor.com"                   # Email del administrador
+# Variables para Let's Encrypt / Certbot
+LE_EMAIL="tu-email@ejemplo.com"              # Email para notificaciones (ej. renovación)
+LE_DOMAIN="tu-dominio.com"                  # Dominio VÁLIDO y registrado
 ```
 
-**Importante:** El `OPENSSL_COMMON_NAME` debe coincidir con el dominio o IP de tu servidor.
+**Importante:**
+- `LE_DOMAIN` debe ser un dominio real registrado que apunte a tu servidor
+- `LE_EMAIL` recibirá notificaciones sobre renovaciones (60 días antes de expirar)
+- Let's Encrypt validará que controlas el dominio
 
 ---
 
-### Tabla de Variables SSL/TLS
+### Proceso de Validación de Let's Encrypt
 
-| Variable | Significado | Ejemplo |
-|----------|-----------|---------|
-| `OPENSSL_COUNTRY` | País (código ISO 2 letras) | `ES`, `US`, `MX` |
-| `OPENSSL_PROVINCE` | Provincia/Región | `Madrid`, `California` |
-| `OPENSSL_LOCALITY` | Ciudad | `Madrid`, `San Francisco` |
-| `OPENSSL_ORGANIZATION` | Nombre empresa/organización | `Mi Empresa S.L.` |
-| `OPENSSL_ORGUNIT` | Departamento/Unidad | `IT`, `DevOps` |
-| `OPENSSL_COMMON_NAME` | **Dominio o IP del servidor** | `www.ejemplo.com`, `192.168.1.1` |
-| `OPENSSL_EMAIL` | Email del administrador | `admin@ejemplo.com` |
+Certbot realiza validación HTTP:
+
+1. **Desafío**: Let's Encrypt envía un código aleatorio
+2. **Respuesta**: Certbot lo coloca en `http://tu-dominio.com/.well-known/acme-challenge/`
+3. **Verificación**: Let's Encrypt accede a esa URL para validar
+4. **Éxito**: Si la validación pasa, se emite el certificado
+
+Por esto es crucial que:
+- El dominio resuelva a tu servidor
+- Puerto 80 esté accesible desde internet
+- Apache esté ejecutándose durante la validación
 
 ---
 
-### Verificar que HTTPS está funcionando
+### Diferencias: Autofirmado vs Let's Encrypt
+
+| Aspecto | Autofirmado | Let's Encrypt |
+|--------|-------------|---------------|
+| **Costo** | Gratuito | Gratuito |
+| **Validez** | No confíable | Confiable |
+| **Navegador** | Advertencia roja | Certificado válido ✓ |
+| **Requiere dominio** | No | Sí |
+| **Renovación** | Manual | Automática |
+| **Vida útil** | Configurable | 90 días |
+| **Uso recomendado** | Desarrollo/Testing | Producción |
+
+---
+
+### Verificar que Let's Encrypt está funcionando
 
 Después de ejecutar el script:
 
-1. **Verificar que Apache reinició correctamente**
+1. **Verificar certificado en el navegador**
    ```bash
-   systemctl status apache2
+   https://tu-dominio.com
+   ```
+   - No debe mostrar advertencia de seguridad
+   - El candado debe verse en verde
+   - Haz clic en el candado para ver detalles
+
+2. **Ver información del certificado en terminal**
+   ```bash
+   sudo certbot certificates
+   # Muestra estado y fecha de expiración
    ```
 
-2. **Acceder a través de HTTPS**
+3. **Verificar con OpenSSL**
    ```bash
-   curl -k https://localhost
-   # O en navegador: https://tu-servidor-ip
-   # Nota: -k ignora la advertencia de certificado no confiable (autofirmado)
+   openssl s_client -connect tu-dominio.com:443 -servername tu-dominio.com
+   # Presiona Ctrl+C para salir
    ```
 
-3. **Ver certificado en el navegador**
-   ![alt text](img/image.png)
-   - Se mostrará una advertencia de seguridad (es normal con certificados autofirmados)
-   - El navegador permite continuar sin riesgos reales
-
-4. **Verificar que los puertos están escuchando**
-   ```bash
-   netstat -tlnp | grep apache2
-   # Debe mostrar escucha en 0.0.0.0:80 y 0.0.0.0:443
-   ```
+4. **Validar certificado con herramientas online**
+   - [SSL Labs](https://www.ssllabs.com/ssltest/)
+   - [Qualys SSL Certificate Checker](https://www.ssllabs.com/ssltest/analyze.html)
+   - Ingresa tu dominio para análisis completo
 
 ---
 
-### Redirigir HTTP → HTTPS (Opcional)
+### Renovación Automática de Certificados
 
-Si quieres forzar que todo tráfico vaya por HTTPS, modifica `000-default.conf`:
+Certbot configura automáticamente la renovación cada 90 días:
+
+```bash
+# Ver trabajos cron programados
+sudo systemctl status snap.certbot.renew.service
+
+# Renovación manual (si es necesario)
+sudo certbot renew
+
+# Renovar con logs detallados
+sudo certbot renew --dry-run
+# (--dry-run simula sin hacer cambios reales)
+```
+
+Certbot envía recordatorios por email 60 y 30 días antes de expirar.
+
+---
+
+### Redirigir HTTP a HTTPS (automático con Let's Encrypt)
+
+Certbot configura automáticamente la redirección HTTP → HTTPS. Pero puedes verificar:
+
+```bash
+# Probar redirección
+curl -I http://tu-dominio.com
+# Debe responder con 301 o 302 hacia HTTPS
+```
+
+Si quieres configurar manualmente:
 
 ```apache
 <VirtualHost *:80>
     ServerName tu-dominio.com
     
-    # Redirigir todo HTTP a HTTPS
     RewriteEngine On
     RewriteCond %{HTTPS} off
     RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 </VirtualHost>
 ```
 
-Luego reinicia Apache:
+---
+
+### Problemas comunes con Let's Encrypt
+
+**Error: "Unable to locate the Server instance or certificates"
+- El dominio no resuelve a tu servidor
+- Verifica DNS: `nslookup tu-dominio.com`
+- Espera 15-30 minutos si acabas de configurar DNS
+
+**Error: "Challenge failed (http-01)"
+- Puerto 80 no está accesible desde internet
+- Verifica Security Groups/Firewall de AWS
+- Asegúrate que Apache está ejecutándose
+
+**Error: "Rate limit exceeded"
+- Has solicitado demasiados certificados en 7 días
+- Espera una semana o usa `--staging` para testing
+
+**Error: "Certificate is not trusted"
+- Todavía está en proceso de validación
+- Espera unos minutos
+- Limpia cache del navegador
+
+**Verificar errores con logs:**
 ```bash
-systemctl restart apache2
+sudo certbot renew --dry-run
+sudo journalctl -u snap.certbot.renew.service -n 50
 ```
 
 ---
 
-### Orden de ejecución recomendado
+### Comparación de Configuración
 
-Para un despliegue completo con HTTPS:
+**Con certificados autofirmados (Práctica 1.4):**
+- Rápido de implementar
+- Para desarrollo/testing
+- Advertencias de seguridad en navegador
 
-1. **Instalar LAMP** (si no está instalado)
-   ```bash
-   bash install_lamp.sh
-   ```
+**Con Let's Encrypt (Práctica 1.5):**
+- Para producción
+- Certificados válidos y confiables
+- Renovación automática
+- Mejora SEO
 
-2. **Desplegar la aplicación**
-   ```bash
-   bash deploy.sh
-   ```
+### Orden de ejecución recomendado (Producción)
 
-3. **Configurar certificados SSL/HTTPS**
-   ```bash
-   sudo bash setup_selfsigned_certificate.sh
-   ```
-
----
-
-### Problemas comunes con SSL
-
-**Error: "Certificate verification failed"**
-- Es normal con certificados autofirmados
-- En curl usa: `curl -k https://localhost`
-- En navegador: haz clic en "Continuar" o "Aceptar riesgo"
-
-**Error: "SSL_ERROR_RX_RECORD_TOO_LONG"**
-- El navegador está accediendo a HTTP en el puerto 443
-- Asegúrate de usar `https://` (no `http://`)
-
-**Error: "Permission denied" al ejecutar el script**
-```bash
-chmod +x scripts/setup_selfsigned_certificate.sh
-sudo bash scripts/setup_selfsigned_certificate.sh
-```
-
-**Los módulos SSL no se cargan**
-```bash
-sudo a2enmod ssl
-sudo a2enmod rewrite
-sudo systemctl restart apache2
-```
+1. Registra un dominio en cualquier registrador
+2. Configura DNS para que apunte a tu servidor
+3. Instala LAMP: `bash install_lamp.sh`
+4. Despliega la aplicación: `bash deploy.sh`
+5. Instala certificado Let's Encrypt: `sudo bash setup_letsencrypt_certificate.sh`
+6. Verifica que HTTPS funciona
+7. Monitorea renovaciones automáticas
 
 ---
 
@@ -266,21 +306,31 @@ sudo bash scripts/deploy.sh
 
 1. **Cambia las contraseñas por defecto** en el archivo `.env`
 2. **No commits `.env`** al repositorio (agrega a `.gitignore`)
-3. **Usa HTTPS en producción** (certificado SSL/TLS)
-   - Este proyecto usa **certificados autofirmados** (útil para desarrollo)
-   - En producción, usa certificados de autoridades certificadoras reconocidas (Let's Encrypt, etc.)
-4. **Protege la clave privada** (`/etc/ssl/private/apache-selfsigned.key`)
+3. **Usa HTTPS en producción** (obligatorio)
+   - Usa certificados válidos de Let's Encrypt (gratuito)
+   - Los certificados autofirmados solo para desarrollo/testing
+4. **Protege las claves privadas**
    - Nunca compartas ni subas a repositorios
-   - Usa permisos restrictivos: `chmod 600`
-5. **Restringe permisos de archivos** sensibles
-6. **Actualiza regularmente** los paquetes del sistema
+   - Certificados: `/etc/ssl/private/` - Permisos restrictivos
+   - Let's Encrypt automáticamente los gestiona
+5. **Monitorea renovaciones de certificados**
+   ```bash
+   sudo certbot certificates   # Ver estado de certificados
+   sudo certbot renew --dry-run # Simular renovación
+   ```
+6. **Restringe permisos de archivos** sensibles
+   ```bash
+   sudo chmod 600 /etc/letsencrypt/live/*/privkey.pem
+   ```
+7. **Actualiza regularmente** los paquetes del sistema
    ```bash
    sudo apt-get update && sudo apt-get upgrade -y
    ```
-7. **Monitora los logs** regularmente
+8. **Monitora los logs** regularmente
    ```bash
    tail -f /var/log/apache2/error.log
    tail -f /var/log/apache2/access.log
+   tail -f /var/log/letsencrypt/letsencrypt.log
    ```
 
 ---
@@ -298,10 +348,10 @@ sudo bash scripts/deploy.sh
 | `REPO_URL` | URL del repositorio Git | `https://github.com/user/repo.git` |
 | `DIR_TEMP` | Directorio temporal | `/tmp/app-temp` |
 
-### Variables de Certificado SSL/TLS [NUEVO]
+### Variables de Certificado SSL/TLS (Autofirmado)
 
 | Variable | Descripción | Ejemplo |
-|----------|-------------|---------|
+|----------|-------------|----------|
 | `OPENSSL_COUNTRY` | País (código ISO 2 letras) | `ES`, `US`, `MX` |
 | `OPENSSL_PROVINCE` | Provincia/Región | `Madrid`, `California` |
 | `OPENSSL_LOCALITY` | Ciudad | `Madrid`, `San Francisco` |
@@ -310,21 +360,38 @@ sudo bash scripts/deploy.sh
 | `OPENSSL_COMMON_NAME` | **Dominio o IP del servidor** | `www.ejemplo.com`, `192.168.1.1` |
 | `OPENSSL_EMAIL` | Email del administrador | `admin@ejemplo.com` |
 
+### Variables de Let's Encrypt / Certbot [NUEVO]
+
+| Variable | Descripción | Ejemplo |
+|----------|-------------|----------|
+| `LE_EMAIL` | Email para notificaciones de renovación | `admin@tu-dominio.com` |
+| `LE_DOMAIN` | Dominio registrado y válido | `mi-sitio.com`, `www.ejemplo.es` |
+
 ---
 
 ## Referencias Útiles
 
+### General
 - [Documentación Apache](https://httpd.apache.org/docs/)
 - [Documentación Apache - SSL/TLS](https://httpd.apache.org/docs/current/ssl/)
-- [Documentación OpenSSL](https://www.openssl.org/docs/)
 - [Documentación MySQL](https://dev.mysql.com/doc/)
 - [Documentación PHP](https://www.php.net/docs.php)
 - [Bash scripting guide](https://www.gnu.org/software/bash/manual/)
-- [Let's Encrypt (certificados gratuitos para producción)](https://letsencrypt.org/)
+
+### SSL/TLS - Autofirmado
+- [Documentación OpenSSL](https://www.openssl.org/docs/)
 - [Mozilla SSL Configuration Generator](https://ssl-config.mozilla.org/)
 
+### Let's Encrypt & Certbot
+- [Let's Encrypt - Certificados gratuitos para producción](https://letsencrypt.org/)
+- [Certbot - Cliente oficial de Let's Encrypt](https://certbot.eff.org/)
+- [Certbot con Apache](https://certbot.eff.org/instructions?ws=apache&os=ubuntufocal)
+- [Let's Encrypt - Cómo funciona](https://letsencrypt.org/how-it-works/)
+- [Troubleshooting Certbot](https://certbot.eff.org/faq/)
+
+### Herramientas de Validación
+- [SSL Labs - Prueba tu certificado](https://www.ssllabs.com/ssltest/)
+- [Qualys SSL Certificate Checker](https://www.ssllabs.com/ssltest/analyze.html)
+- [Let's Encrypt Dashboard](https://letsencrypt.org/issuance/)
+
 ---
-
-## Contacto y Soporte
-
-Para problemas o preguntas sobre este despliegue, contacta al administrador del sistema.
